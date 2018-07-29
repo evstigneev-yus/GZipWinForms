@@ -15,38 +15,37 @@ namespace WinFormsGzip
         /// Throw exception if file does not exist
         /// </summary>
         /// <param name="srcFileName"></param>
-        public MyGzip(string srcFileName)
+        /// <param name="destFileName"></param>
+        /// <param name="compressionMode"></param>
+        public MyGzip(string srcFileName, string destFileName, CompressionMode compressionMode)
         {
-            SrcFileName = srcFileName;
-            FunctionFlg = srcFileName.EndsWith(".gz");
-            DestFileName = FunctionFlg ? SrcFileName.Remove(SrcFileName.Length - 3) : SrcFileName + ".gz";
-            sourceFi = new FileInfo(SrcFileName);
+            _compressionMode = compressionMode;
+            DestFileName = destFileName;
+            sourceFi = new FileInfo(srcFileName);
             if (!sourceFi.Exists)
             {
                 throw new Exception("File not found");
             }
         }
-
         private FileInfo sourceFi { get; set; }
-        private string SrcFileName { get; set; }
         private string DestFileName { get; set; }
-        public bool FunctionFlg { get; set; }//false - архивировать true-разархивировать
-        public Action<long> progressAction { get; set; }
+        private readonly CompressionMode _compressionMode;
+        public Action<long> ProgressAction { get; set; }
         public Action<long> RezFileLength { get; set; }
-        public CancellationToken cancellationToken { get; set; }
+        public CancellationToken CancellationToken { get; set; }
 
         public async void Compress()
         {
             try
             {
-                RezFileLength.Invoke(sourceFi.Length);
+                RezFileLength?.Invoke(sourceFi.Length);
                 using (var src = sourceFi.OpenRead())
                 {
                     using (var dest = new FileStream(DestFileName, FileMode.Create))
                     {
                         using (var gz = new GZipStream(dest, CompressionMode.Compress))
                         {
-                            await src.CopyToWithProgressAsync(gz, 1024 * 1024 * 8, progressAction, cancellationToken);
+                            await src.CopyToWithProgressAsync(gz, 1024 * 1024 * 8, ProgressAction, CancellationToken);
                         }
                     }
                 }
@@ -78,7 +77,7 @@ namespace WinFormsGzip
                         using (var gz = new GZipStream(originalFileStream, CompressionMode.Decompress))
                         {
                             await gz.CopyToWithProgressAsync(dest, 1024 * 1024 * 8,
-                                progressAction, cancellationToken);
+                                ProgressAction, CancellationToken);
                         }
                     }
                 }
@@ -88,6 +87,19 @@ namespace WinFormsGzip
                 File.Delete(DestFileName);
             }
             
+        }
+
+        public void DoWork()
+        {
+            switch (_compressionMode)
+            {
+                case CompressionMode.Compress:
+                        Compress();
+                    break;
+                case CompressionMode.Decompress:
+                        Decompress();
+                    break;
+            }
         }
     }
 }

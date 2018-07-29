@@ -17,6 +17,9 @@ namespace WinFormsGzip
     public partial class Form1 : Form
     {
         private MyGzip _zipper;
+        private CompressionMode _compressionMode=CompressionMode.Compress;
+        private string _source;
+        private string _dest;
         private static CancellationTokenSource cts = new CancellationTokenSource();
         private CancellationToken ct = cts.Token;
 
@@ -31,35 +34,32 @@ namespace WinFormsGzip
             if (dr == DialogResult.OK)
             {
                 textBox1.Text = openFileDialog1.FileName;
-                try
-                {
-                    _zipper = new MyGzip(openFileDialog1.FileName)
-                    {
-                        progressAction = (a) => labelProcessed.Text = a.ToString(),
-                        cancellationToken = ct,
-                        RezFileLength = (a)=> labelAll.Text = a.ToString()
-                    };
-                }
-                catch (Exception exception)
-                {
-                    MessageBox.Show(exception.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
+                _source= openFileDialog1.FileName;
             }
         }
 
         private void button2_Click(object sender, EventArgs e)
         {
-            if(textBox1.Text=="") return;
+            _dest = folderBrowserDialog1.SelectedPath + openFileDialog1.SafeFileName;
+            if (_compressionMode == CompressionMode.Compress)
+            {
+                _dest += ".gz";
+            }
+            else
+            {
+                _dest = _dest.Remove(_dest.Length - 3);
+            }
+            _zipper = new MyGzip(_source, _dest, _compressionMode)
+            {
+                ProgressAction = (a) => labelProcessed.Text = a.ToString(),
+                CancellationToken = ct,
+                RezFileLength = (a) => labelAll.Text = a.ToString()
+            };
+
+            if (textBox1.Text=="") return;
             try
             {
-                if (_zipper.FunctionFlg)
-                {
-                    _zipper.Decompress();
-                }
-                else
-                {
-                    _zipper.Compress();
-                }
+                _zipper.DoWork();
             }
             catch (Exception exception)
             {
@@ -70,6 +70,27 @@ namespace WinFormsGzip
         private void button3_Click(object sender, EventArgs e)
         {
             cts.Cancel();
+        }
+
+        private void radioButton2_CheckedChanged(object sender, EventArgs e)
+        {
+            _compressionMode = CompressionMode.Decompress;
+        }
+
+        private void radioButton1_CheckedChanged(object sender, EventArgs e)
+        {
+            _compressionMode = CompressionMode.Compress;
+        }
+
+        private void button4_Click(object sender, EventArgs e)
+        {
+            var dr = folderBrowserDialog1.ShowDialog(this);
+            if (dr == DialogResult.OK)
+            {
+                _dest = folderBrowserDialog1.SelectedPath;
+                textBox2.Text = _dest;
+                
+            }
         }
     }
     
