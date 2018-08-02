@@ -22,6 +22,7 @@ namespace WinFormsGzip
         private string _dest;
         private static CancellationTokenSource cts = new CancellationTokenSource();
         private CancellationToken ct = cts.Token;
+        private static bool _cancellTag;
 
         public Form1()
         {
@@ -38,9 +39,9 @@ namespace WinFormsGzip
             }
         }
 
-        private void button2_Click(object sender, EventArgs e)
+        private async void button2_Click(object sender, EventArgs e)
         {
-            _dest = folderBrowserDialog1.SelectedPath + openFileDialog1.SafeFileName;
+            _dest = folderBrowserDialog1.SelectedPath+ '\\' + openFileDialog1.SafeFileName;
             if (_compressionMode == CompressionMode.Compress)
             {
                 _dest += ".gz";
@@ -49,6 +50,18 @@ namespace WinFormsGzip
             {
                 _dest = _dest.Remove(_dest.Length - 3);
             }
+
+            using (var gz = new ThreadedGzip(_source, _dest,ref _cancellTag))
+            {
+                await Task.Run(() => gz.Compress(), ct);
+                return;
+            }
+
+            
+
+           
+            
+
             _zipper = new MyGzip(_source, _dest, _compressionMode)
             {
                 ProgressAction = (a) => labelProcessed.Text = a.ToString(),
@@ -69,6 +82,7 @@ namespace WinFormsGzip
 
         private void button3_Click(object sender, EventArgs e)
         {
+            _cancellTag = true;
             cts.Cancel();
         }
 

@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -17,6 +19,7 @@ namespace WinFormsGzip
         [STAThread]
         static void Main(string[] argc)
         {
+
             #region ConsoleInputProcessing
             //if (argc.Length==3)
             //{
