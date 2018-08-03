@@ -45,6 +45,10 @@ namespace pgzip
             _inFileStream = new FileStream(_inFileName, FileMode.Open);
             _outFileStream = new FileStream(OutFileName, FileMode.Append);
             var tPool = new Thread[_cpuNum];
+            if ( _inFileStream.Length < BlockSize * _cpuNum)
+            {
+                BlockSize =(int)( _inFileStream.Length / _cpuNum);
+            }
             for (var i = 0; i < _cpuNum; i++)
             {
                 if (token.IsCancellationRequested) break;

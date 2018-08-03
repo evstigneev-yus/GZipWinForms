@@ -67,6 +67,7 @@ namespace WinFormsGzip
                     await Task.Run(() => gz.Decompress(ct), ct);
                 }
             }
+            GC.Collect();
         }
 
         private void button3_Click(object sender, EventArgs e)
