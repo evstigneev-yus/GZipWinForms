@@ -6,105 +6,92 @@ using System.Drawing;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using pgzip;
 
 namespace WinFormsGzip
 {
     
     public partial class Form1 : Form
     {
-        private MyGzip _zipper;
         private CompressionMode _compressionMode=CompressionMode.Compress;
         private string _source;
         private string _dest;
-        private static CancellationTokenSource cts = new CancellationTokenSource();
-        private CancellationToken ct = cts.Token;
-        private static bool _cancellTag;
+        private static readonly CancellationTokenSource cts = new CancellationTokenSource();
+        private readonly CancellationToken ct = cts.Token;
+        private readonly SynchronizationContext syncContext;
 
         public Form1()
         {
+            syncContext = SynchronizationContext.Current;
             InitializeComponent();
         }
         
         private void button1_Click(object sender, EventArgs e)
         {
             var dr = openFileDialog1.ShowDialog(this);
-            if (dr == DialogResult.OK)
-            {
-                textBox1.Text = openFileDialog1.FileName;
-                _source= openFileDialog1.FileName;
-            }
+            if (dr != DialogResult.OK) return;
+            textBox1.Text = openFileDialog1.FileName;
+            _source= openFileDialog1.FileName;
         }
 
-        private async void button2_Click(object sender, EventArgs e)
+        
+        private void button2_Click(object sender, EventArgs e)
         {
-            _dest = folderBrowserDialog1.SelectedPath+ '\\' + openFileDialog1.SafeFileName;
-            if (_compressionMode == CompressionMode.Compress)
-            {
-                _dest += ".gz";
-            }
-            else
-            {
-                _dest = _dest.Remove(_dest.Length - 3);
-            }
+            DoWork();
+        }
 
-            using (var gz = new ThreadedGzip(_source, _dest,ref _cancellTag))
+        private async void DoWork()
+        {
+            var fi = new FileInfo(_source);
+            labelAll.Text = fi.Length.ToString();
+            _dest = folderBrowserDialog1.SelectedPath + '\\' + openFileDialog1.SafeFileName;
+            using (var gz = new ThreadedGzip(_source,
+                a => { syncContext.Post(o => { labelProcessed.Text = o.ToString(); }, a); }))
             {
-                await Task.Run(() => gz.Compress(), ct);
-                return;
-            }
-
-            
-
-           
-            
-
-            _zipper = new MyGzip(_source, _dest, _compressionMode)
-            {
-                ProgressAction = (a) => labelProcessed.Text = a.ToString(),
-                CancellationToken = ct,
-                RezFileLength = (a) => labelAll.Text = a.ToString()
-            };
-
-            if (textBox1.Text=="") return;
-            try
-            {
-                _zipper.DoWork();
-            }
-            catch (Exception exception)
-            {
-                MessageBox.Show(exception.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                if (_compressionMode == CompressionMode.Compress)
+                {
+                    _dest += ".gz";
+                    gz.OutFileName = _dest;
+                    gz.BlockSize = (int) numericUpDown1.Value * 1048576;
+                    await Task.Run(() => gz.Compress(ct), ct);
+                }
+                else
+                {
+                    _dest = _dest.Remove(_dest.Length - 3);
+                    gz.OutFileName = _dest;
+                    await Task.Run(() => gz.Decompress(ct), ct);
+                }
             }
         }
 
         private void button3_Click(object sender, EventArgs e)
         {
-            _cancellTag = true;
             cts.Cancel();
         }
 
         private void radioButton2_CheckedChanged(object sender, EventArgs e)
         {
             _compressionMode = CompressionMode.Decompress;
+            numericUpDown1.Enabled = false;
         }
 
         private void radioButton1_CheckedChanged(object sender, EventArgs e)
         {
             _compressionMode = CompressionMode.Compress;
+            numericUpDown1.Enabled = true;
         }
 
         private void button4_Click(object sender, EventArgs e)
         {
             var dr = folderBrowserDialog1.ShowDialog(this);
-            if (dr == DialogResult.OK)
-            {
-                _dest = folderBrowserDialog1.SelectedPath;
-                textBox2.Text = _dest;
-                
-            }
+            if (dr != DialogResult.OK) return;
+            _dest = folderBrowserDialog1.SelectedPath;
+            textBox2.Text = _dest;
         }
     }
     

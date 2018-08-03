@@ -7,65 +7,56 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace WinFormsGzip
+namespace pgzip
 {
-    public class ThreadedGzip:IDisposable
+    public class ThreadedGzip : IDisposable
     {
-        private static int _cpuNum = Environment.ProcessorCount;
+        #region private fields
+        private static readonly int _cpuNum = Environment.ProcessorCount;
         private byte[][] _uncompressedDataArray = new byte[_cpuNum][];
         private byte[][] _compressedDataArray = new byte[_cpuNum][];
-        private static bool _cancelToken;
-        private FileStream _inFileStream;
-        private FileStream _outFileStream;
-        public bool CancellToken
-        {
-            get => _cancelToken;
-            set => _cancelToken = value;
-        }
+        private static FileStream _inFileStream;
+        private static FileStream _outFileStream;
         private readonly string _inFileName;
-        private readonly string _outFileName;
-        public ThreadedGzip(string inFileName, string outFileName,ref bool cancelToken)
+        private static Action<long> _progressAction;
+        #endregion
+        #region public fields
+        public string OutFileName { get; set; }
+        public int BlockSize { get; set; }
+        #endregion
+        #region constructors
+        public ThreadedGzip(string inFileName, Action<long> progressAction)
         {
-            var fi = new FileInfo(outFileName);
+            OutFileName = inFileName + ".gz";
+            _inFileName = inFileName;
+            OutFileName = inFileName + ".gz";
+            BlockSize = 104857600;
+            _progressAction = progressAction;
+        }
+        #endregion
+        #region public functions
+        public void Compress(CancellationToken token)
+        {
+            var fi = new FileInfo(OutFileName);
             if (fi.Exists)
             {
                 fi.Delete();
             }
-            _inFileName = inFileName;
-            _outFileName = outFileName;
-            _cancelToken = cancelToken;
-        }
-
-        public void Compress()
-        {
-
             _inFileStream = new FileStream(_inFileName, FileMode.Open);
-            _outFileStream = new FileStream(_outFileName, FileMode.Append);
-
-            #region Считаем размер блока
-            var bpb = new MyBytesCounter();
-            var bytesPerBlock = bpb.GetBytesPerBlock();
-            if ((_inFileStream.Length / bytesPerBlock) < bpb.CPUCores)
-            {
-                bytesPerBlock = (int)(_inFileStream.Length / bpb.CPUCores);
-            }
-            var initialBlockSize = bytesPerBlock;
-            #endregion
-            
+            _outFileStream = new FileStream(OutFileName, FileMode.Append);
             var tPool = new Thread[_cpuNum];
             for (var i = 0; i < _cpuNum; i++)
             {
-                if (_cancelToken) break;
-                StartNewCompressThread(i, initialBlockSize, ref _inFileStream, ref tPool);
+                if (token.IsCancellationRequested) break;
+                StartNewCompressThread(i, BlockSize, ref _inFileStream, ref tPool);
             }
-            for (var i = 0; i < _cpuNum && tPool[i] != null && !_cancelToken;)
+            for (var i = 0; (i < _cpuNum && tPool[i] != null) && !token.IsCancellationRequested;)
             {
-                if (_cancelToken)
+                if (token.IsCancellationRequested)
                 {
                     foreach (var thread in tPool)
                     {
                         thread.Join();
-                        thread.Interrupt();
                     }
                     break;
                 }
@@ -79,9 +70,9 @@ namespace WinFormsGzip
                 tPool[i] = null;
                 //Костыль от переполнения
                 GC.Collect();
-                if (_inFileStream.Position < _inFileStream.Length )
+                if (_inFileStream.Position < _inFileStream.Length)
                 {
-                    StartNewCompressThread(i, initialBlockSize, ref _inFileStream, ref tPool);
+                    StartNewCompressThread(i, BlockSize, ref _inFileStream, ref tPool);
                 }
                 i++;
                 if (i == _cpuNum)
@@ -91,44 +82,31 @@ namespace WinFormsGzip
             }
             _outFileStream.Close();
             _inFileStream.Close();
-        }
-        private void StartNewCompressThread(int i, int initialBlockSize, ref FileStream inFileStream,ref Thread[] tPool)
-        {
-            int blockSize;
-            if (inFileStream.Length - inFileStream.Position <= initialBlockSize)
+            if (token.IsCancellationRequested)
             {
-                blockSize = (int)(inFileStream.Length - inFileStream.Position);
-            }
-            else
-            {
-                blockSize = initialBlockSize;
-            }
-            _uncompressedDataArray[i] = new byte[blockSize];
-            tPool[i] = new Thread(CompressBlock);
-            tPool[i].Start(i);
-        }
-        private void CompressBlock(object i)
-        {
-            using (var output = new MemoryStream(_uncompressedDataArray[(int)i].Length))
-            {
-                using (var gZipStream = new GZipStream(output, CompressionMode.Compress))
+                var f = new FileInfo(OutFileName);
+                if (f.Exists)
                 {
-                    gZipStream.Write(_uncompressedDataArray[(int)i], 0, _uncompressedDataArray[(int)i].Length);
+                    f.Delete();
                 }
-                _compressedDataArray[(int)i] = output.ToArray();
             }
         }
-        public void Decompress()
+        public void Decompress(CancellationToken token)
         {
-            _inFileStream = new FileStream(_inFileName, FileMode.Open);
-            _outFileStream = new FileStream(_outFileName, FileMode.Append);
-            var tPool = new Thread[_cpuNum];
-            for (var i = 0;i < _cpuNum;i++)
+            var fi = new FileInfo(OutFileName);
+            if (fi.Exists)
             {
-                if (_cancelToken) break;
+                fi.Delete();
+            }
+            _inFileStream = new FileStream(_inFileName, FileMode.Open);
+            _outFileStream = new FileStream(OutFileName, FileMode.Append);
+            var tPool = new Thread[_cpuNum];
+            for (var i = 0; i < _cpuNum; i++)
+            {
+                if (token.IsCancellationRequested) break;
                 StartNewDecompressThread(i, ref _inFileStream, ref tPool);
             }
-            for (var i = 0; i < _cpuNum && tPool[i] != null && !_cancelToken;)
+            for (var i = 0; i < _cpuNum && tPool[i] != null && !token.IsCancellationRequested;)
             {
                 tPool[i].Join();
 
@@ -148,6 +126,44 @@ namespace WinFormsGzip
             }
             _outFileStream.Close();
             _inFileStream.Close();
+            if (token.IsCancellationRequested)
+            {
+                var f = new FileInfo(OutFileName);
+                if (f.Exists)
+                {
+                    f.Delete();
+                }
+            }
+        }
+        #endregion
+        #region private functions
+        private void StartNewCompressThread(int i, int initialBlockSize, ref FileStream inFileStream, ref Thread[] tPool)
+        {
+            int blockSize;
+            if (inFileStream.Length - inFileStream.Position <= initialBlockSize)
+            {
+                blockSize = (int)(inFileStream.Length - inFileStream.Position);
+            }
+            else
+            {
+                blockSize = initialBlockSize;
+            }
+            _uncompressedDataArray[i] = new byte[blockSize];
+            inFileStream.Read(_uncompressedDataArray[i], 0, blockSize);
+            _progressAction.Invoke(inFileStream.Position);
+            tPool[i] = new Thread(CompressBlock);
+            tPool[i].Start(i);
+        }
+        private void CompressBlock(object i)
+        {
+            using (var output = new MemoryStream(_uncompressedDataArray[(int)i].Length))
+            {
+                using (var gZipStream = new GZipStream(output, CompressionMode.Compress))
+                {
+                    gZipStream.Write(_uncompressedDataArray[(int)i], 0, _uncompressedDataArray[(int)i].Length);
+                }
+                _compressedDataArray[(int)i] = output.ToArray();
+            }
         }
         private void StartNewDecompressThread(int i, ref FileStream inFileStream, ref Thread[] tPool)
         {
@@ -159,6 +175,7 @@ namespace WinFormsGzip
             _compressedDataArray[i] = new byte[compressedBlockLength + 1];
             buffer.CopyTo(_compressedDataArray[i], 0);
             inFileStream.Read(_compressedDataArray[i], 8, compressedBlockLength - 8);
+            _progressAction.Invoke(inFileStream.Position);
             //читаем размер блока после разархивации из футера файла
             var blockSize = BitConverter.ToInt32(_compressedDataArray[i], compressedBlockLength - 4);
             _uncompressedDataArray[i] = new byte[blockSize];
@@ -176,18 +193,16 @@ namespace WinFormsGzip
             }
         }
 
+
+        #endregion
+        #region IDisposable
+
         public void Dispose()
         {
-            if (_cancelToken)
-            {
-                var fi = new FileInfo(_outFileName);
-                if (fi.Exists)
-                {
-                    fi.Delete();
-                }
-            }
             _outFileStream.Close();
             _inFileStream.Close();
         }
+
+        #endregion
     }
 }
